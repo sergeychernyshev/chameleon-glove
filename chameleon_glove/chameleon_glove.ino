@@ -4,40 +4,59 @@
 #include <Adafruit_LSM303.h>
 
 
-#define PIN 9
-#define TPIXEL 113 //The total amount of pixel's/led's in your connected strip/stick (Default is 60)
- 
-int switchPin = 10; // switch is connected to pin 10
-int val; // variable for reading the pin status
-int val2;
-int buttonState; // variable to hold the button state
-int lightMode = 0; // how many times the button has been pressed
+// Number of the pin LED are connected to
+#define LEDPIN 9
+
+// The total amount of pixels (ring + fingers starting from index ending with thumb)
+#define TPIXEL 16 + 19 + 20 + 19 + 19 + 19
+
+// Color sensor pin on the index finger
+#define COLOR_SENSOR_PIN 10 // switch is connected to pin 10
+
+// Mode switch pin
+#define MODE_PIN 6
+
+// Modes in the app
+#define OFF_MODE 0
+#define COLOR_THIEF_MODE 1
+#define COMPASS_MODE 2
+
+// Mode switching variable
+#define TOTAL_MODES 2
+int current_mode = 0;
+int mode_button_state = 0;
+boolean mode_initialized = false;
+
 // our RGB -> eye-recognized gamma color
 byte gammatable[256];
 
 // Peripherals 
-Adafruit_NeoPixel strip = Adafruit_NeoPixel(TPIXEL, PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel strip = Adafruit_NeoPixel(TPIXEL, LEDPIN, NEO_GRB + NEO_KHZ800);
 Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_4X);
 Adafruit_LSM303 lsm;
 
 void setup() {
   Serial.begin(9600); // Set up serial communication at 9600bps
 
-  pinMode(switchPin, INPUT_PULLUP); // Set the switch pin as input
-  buttonState = digitalRead(switchPin); // read the initial state
+  // Set the switch pins as inputs
+  pinMode(MODE_PIN, INPUT_PULLUP);
+  pinMode(COLOR_SENSOR_PIN, INPUT_PULLUP);
 
-  // NEopixels
-  pinMode(PIN, OUTPUT);
+  // Neopixels
+  pinMode(LEDPIN, OUTPUT);
   strip.setBrightness(80); //adjust brightness here
   strip.begin();
   strip.show(); // Initialize all pixels to 'off'
 
   // Color Sensor
+  // Try to initialise and warn if we couldn't detect the chip
   if (!tcs.begin()) {
     Serial.println("No TCS34725 found ... check your connections");
     while (1); // halt!
   }
-  
+
+  tcs.setInterrupt(true); // turn off color sensor's LED
+
   // Accelerometer / magnetometer
   // Try to initialise and warn if we couldn't detect the chip
   if (!lsm.begin())
@@ -54,27 +73,18 @@ void setup() {
     x = pow(x, 2.5);
     x *= 255;
     gammatable[i] = x;
-    //Serial.println(gammatable[i]);
   }
-
-  readSensorAndSetColor();
 }
 
 void readSensorAndSetColor() {
   uint16_t clear, red, green, blue;
  
   tcs.setInterrupt(false); // turn on LED
- 
   delay(60); // takes 50ms to read
-
   tcs.getRawData(&red, &green, &blue, &clear);
   tcs.setInterrupt(true); // turn off LED
-  Serial.print("C:\t"); Serial.print(clear);
-  Serial.print("\tR:\t"); Serial.print(red);
-  Serial.print("\tG:\t"); Serial.print(green);
-  Serial.print("\tB:\t"); Serial.print(blue);
-
-  colorWipe(sensorToColor(red, green, blue, clear), 0);
+ 
+  colorWipe(sensorToColor(red, green, blue, clear));
 }
 
 uint32_t sensorToColor(uint16_t red, uint16_t green, uint16_t blue, uint16_t clear) {
@@ -83,68 +93,84 @@ uint32_t sensorToColor(uint16_t red, uint16_t green, uint16_t blue, uint16_t cle
   sum += green;
   sum += blue;
   sum = clear;
+
   float r, g, b;
   r = red; r /= sum;
   g = green; g /= sum;
   b = blue; b /= sum;
   r *= 256; g *= 256; b *= 256;
-/*
-  Serial.print("\t");
-  Serial.print((int)r, HEX); Serial.print((int)g, HEX); Serial.print((int)b, HEX);
-  Serial.println();
- 
-  Serial.print((int)r );
-  Serial.print(" ");
-  Serial.print((int)g);
-  Serial.print(" ");
-  Serial.println((int)b);
-*/  
+
   return strip.Color(gammatable[(int)r], gammatable[(int)g], gammatable[(int)b]);
 }
 
 // Fill the dots one after the other with a color
-void colorWipe(uint32_t c, uint8_t wait) {
+// This blocks input until colors are all set
+void colorWipe(uint32_t c) {
   for (uint16_t i=0; i<strip.numPixels(); i++) {
     strip.setPixelColor(i, c);
     strip.show();
-
-    //delay(20);
   }
 }
  
 void loop() {
-  val = digitalRead(switchPin); // read input value and store it in val
+  // pair of variables for switch value reading
+  int val, val2;
+  
+  val = digitalRead(MODE_PIN);
   delay (20);
-  val2 = digitalRead(switchPin);
-  
-  Serial.print("LightMode: ");
-  Serial.print(lightMode);  
-  Serial.print("\n");
+  val2 = digitalRead(MODE_PIN);
 
-  Serial.print("Switch: ");
-  Serial.print(val);
-  Serial.print("\t");
-  Serial.print(val2);
-  Serial.print("\n");
-  
-  if (val == val2) {
-    if (val==LOW) { // the button state has changed!
-      if (lightMode == 0) {
-        lightMode = 1;
+  if (val == val2 && val != mode_button_state) {
+    // if button was already pressed in previous loop, don't continue switching the mode
+    mode_button_state = val;
+
+    if (mode_button_state == LOW) {
+      // switching mode
+      current_mode += 1;
+      if (current_mode >= TOTAL_MODES) {
+        current_mode = 0;
       }
+
+      mode_initialized = false;
     }
   }
 
-  // show color
-  if (lightMode == 0) {
+  Serial.print("Current Mode");
+  Serial.println(current_mode);
+
+  if (current_mode == COLOR_THIEF_MODE) {
+    // read input value twice and store it to see if button was pressed continiously
+    val = digitalRead(COLOR_SENSOR_PIN);
+    delay (20);
+    val2 = digitalRead(COLOR_SENSOR_PIN);
+
+    // if same value after 20 millis and it's pressed, trigger
+    if (val == val2 && val == LOW) {
+          readSensorAndSetColor();
+    }
+
     strip.show();
-    Serial.print("Showing Color\n");
+  }
+  
+  if (!mode_initialized) {
+    initMode(current_mode);
+  }
+}
+
+void initMode(int mode) {
+  colorWipe(0);
+
+  if (mode == COLOR_THIEF_MODE) {
+    strip.setPixelColor(16, 255);
+    strip.setPixelColor(17, 255);
+    strip.setPixelColor(18, 255);
+    strip.show();
+  } else if (mode == COMPASS_MODE) {
+    strip.setPixelColor(35, 255);
+    strip.setPixelColor(36, 255);
+    strip.setPixelColor(37, 255);
+    strip.show();
   }
 
-  // measuring light
-  if (lightMode == 1) {
-    Serial.print("Sensing Color\n");
-    readSensorAndSetColor();
-    lightMode = 0;
-  }
+  mode_initialized = true;
 }
