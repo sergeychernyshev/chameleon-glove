@@ -23,7 +23,7 @@
 
 // Mode switching variable
 #define TOTAL_MODES 2
-int current_mode = 0;
+int current_mode = COLOR_THIEF_MODE;
 int mode_button_state = 0;
 boolean mode_initialized = false;
 
@@ -115,12 +115,10 @@ void colorWipe(uint32_t c) {
 void loop() {
   // pair of variables for switch value reading
   int val, val2;
-  
-  val = digitalRead(MODE_PIN);
-  delay (20);
-  val2 = digitalRead(MODE_PIN);
 
-  if (val == val2 && val != mode_button_state) {
+  val = digitalRead(MODE_PIN);
+
+  if (val != mode_button_state) {
     // if button was already pressed in previous loop, don't continue switching the mode
     mode_button_state = val;
 
@@ -130,19 +128,26 @@ void loop() {
       if (current_mode >= TOTAL_MODES) {
         current_mode = 0;
       }
-
       mode_initialized = false;
     }
   }
 
-  Serial.print("Current Mode");
-  Serial.println(current_mode);
+  if (!mode_initialized) {
+    initMode(current_mode);
+  }
+
+  val = digitalRead(COLOR_SENSOR_PIN);
+  Serial.print("Color pin: ");
+  Serial.println(val);
 
   if (current_mode == COLOR_THIEF_MODE) {
     // read input value twice and store it to see if button was pressed continiously
-    val = digitalRead(COLOR_SENSOR_PIN);
     delay (20);
     val2 = digitalRead(COLOR_SENSOR_PIN);
+
+    Serial.print("Measuring color: ");
+    Serial.print(val);
+    Serial.println(val2);
 
     // if same value after 20 millis and it's pressed, trigger
     if (val == val2 && val == LOW) {
@@ -151,20 +156,25 @@ void loop() {
 
     strip.show();
   }
-  
-  if (!mode_initialized) {
-    initMode(current_mode);
-  }
 }
 
 void initMode(int mode) {
+  int i, j;
   colorWipe(0);
 
   if (mode == COLOR_THIEF_MODE) {
-    strip.setPixelColor(16, 255);
-    strip.setPixelColor(17, 255);
-    strip.setPixelColor(18, 255);
-    strip.show();
+    for (i=1; i<35; i++) {
+      for (j = i; j<35; j+=2) {
+        strip.setPixelColor(j, sensorToColor(255,255,255,255));
+        strip.setPixelColor(j-1, 0);
+        strip.setPixelColor(j+1, 0);
+      }
+      delay(60);
+      strip.show();
+    }
+    colorWipe(0);
+    delay(100);
+    readSensorAndSetColor();
   } else if (mode == COMPASS_MODE) {
     strip.setPixelColor(35, 255);
     strip.setPixelColor(36, 255);
