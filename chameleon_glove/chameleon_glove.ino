@@ -23,7 +23,7 @@
 
 // Mode switching variable
 #define TOTAL_MODES 2
-int current_mode = COLOR_THIEF_MODE;
+int current_mode = OFF_MODE;
 int mode_button_state = 0;
 boolean mode_initialized = false;
 
@@ -151,20 +151,23 @@ void loop() {
 
     // if same value after 20 millis and it's pressed, trigger
     if (val == val2 && val == LOW) {
-          readSensorAndSetColor();
+      readSensorAndSetColor();
     }
-
-    strip.show();
   }
 }
 
 void initMode(int mode) {
-  int i, j;
+  int i, j, endofline;
   colorWipe(0);
 
   if (mode == COLOR_THIEF_MODE) {
-    for (i=1; i<35; i++) {
-      for (j = i; j<35; j+=2) {
+    for (i = 1; i < 35; i++) {
+      endofline = i + 10;
+      if (endofline > 35) {
+        tcs.setInterrupt(false); // turn on LED
+        endofline = 35;
+      }
+      for (j = i; j < endofline; j+=2) {
         strip.setPixelColor(j, sensorToColor(255,255,255,255));
         strip.setPixelColor(j-1, 0);
         strip.setPixelColor(j+1, 0);
@@ -173,7 +176,6 @@ void initMode(int mode) {
       strip.show();
     }
     colorWipe(0);
-    delay(100);
     readSensorAndSetColor();
   } else if (mode == COMPASS_MODE) {
     strip.setPixelColor(35, 255);
